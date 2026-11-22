@@ -13,7 +13,7 @@ async function schedule(env) {
   const today = Date.parse(jstDate(now) + 'T00:00:00+09:00');
   const end = today + 2 * 86400000;
   return json({
-    updatedAt: row?.refreshed_at ?? null,
+    updatedAt: row?.refreshed_at || null,
     airings: snapshot.airings.filter(row => row.startsAt >= today && row.startsAt < end),
     season: snapshot.season?.key === seasonKey(now) ? snapshot.season : null
   });

@@ -84,21 +84,58 @@ function buildSeason(airings, titles, previous, now) {
 
 export async function refreshSchedule(db) {
   const refreshedAt = Date.now();
-  const today = Date.parse(jstDate(refreshedAt) + 'T00:00:00+09:00');
+  const date = jstDate(refreshedAt);
+  // スケジュール変更の反映中や同時起動でも、配信元への同期開始は日本時間で1日1回。
+  const claim = await db.prepare(`INSERT INTO schedule VALUES(1, 0, json_object('airings', json_array(), 'attemptedOn', ?))
+    ON CONFLICT(id) DO UPDATE SET airings = CASE
+      WHEN json_type(schedule.airings) = 'array'
+        THEN json_object('airings', json(schedule.airings), 'attemptedOn', ?)
+      ELSE json_set(schedule.airings, '$.attemptedOn', ?)
+    END
+    WHERE COALESCE(json_extract(schedule.airings, '$.attemptedOn'), '') < ?
+    RETURNING airings`).bind(date, date, date, date).first();
+  if (!claim) return;
+
+  const previous = readSnapshot(claim);
+  const today = Date.parse(date + 'T00:00:00+09:00');
   const start = today - 7 * DAY;
   const end = today + 7 * DAY;
-  const response = await source('/json.php', {
-    Req: 'ProgramByDate,TitleShort',
+  const data = await source({
+    Req: 'ProgramByDate',
     // 配信元は午前5時区切りなので、前日の分から取得して日本時間の0時で絞る。
     start: jstDate(start - DAY), days: '15', ChID: CHANNELS.join(',')
   });
-  const data = await response.json();
-  if (!data.Programs || !data.Titles) throw new Error('番組表の形式が変わりました');
-  const airings = normalizeSchedule(Object.values(data.Programs), data.Titles, start, end);
+  if (!data.Programs) throw new Error('番組表の形式が変わりました');
+  const programs = Object.values(data.Programs);
+  const ids = [...new Set(programs.map(program => String(program.TID)).filter(id => /^[1-9]\d{0,8}$/.test(id)))];
+  const titles = {};
+  const titleCache = {};
+  const missing = [];
+  for (const id of ids) {
+    const entry = previous.titleCache?.[id];
+    if (entry && refreshedAt - entry.updatedAt < 7 * DAY) {
+      titles[id] = entry.title;
+      titleCache[id] = entry;
+    } else {
+      missing.push(id);
+    }
+  }
+  for (let offset = 0; offset < missing.length; offset += 100) {
+    const group = missing.slice(offset, offset + 100);
+    const data = await source({ Req: 'TitleShort', TID: group.join(',') });
+    if (!data.Titles) throw new Error('作品情報の形式が変わりました');
+    for (const id of group) {
+      const value = data.Titles[id];
+      if (!value?.Title) continue;
+      const { Title, Cat, FirstYear, FirstMonth, FirstEndYear, FirstEndMonth } = value;
+      const title = { Title, Cat, FirstYear, FirstMonth, FirstEndYear, FirstEndMonth };
+      titles[id] = title;
+      titleCache[id] = { title, updatedAt: refreshedAt };
+    }
+  }
+  const airings = normalizeSchedule(programs, titles, start, end);
   if (!airings.length) throw new Error('取得対象の放送がありません');
-
-  const previous = await db.prepare('SELECT airings FROM schedule WHERE id = 1').first();
-  const season = buildSeason(airings, data.Titles, readSnapshot(previous).season, refreshedAt);
+  const season = buildSeason(airings, titles, previous.season, refreshedAt);
   const threads = new Map();
   for (const airing of airings) {
     if (!threads.has(airing.id) || airing.subtitle) threads.set(airing.id, airing);
@@ -115,14 +152,14 @@ export async function refreshSchedule(db) {
   await db.prepare(`INSERT INTO schedule VALUES(1, ?, ?)
     ON CONFLICT(id) DO UPDATE SET refreshed_at=excluded.refreshed_at, airings=excluded.airings
     WHERE excluded.refreshed_at >= schedule.refreshed_at`)
-    .bind(refreshedAt, JSON.stringify({ airings, season })).run();
+    .bind(refreshedAt, JSON.stringify({ airings, season, titleCache, attemptedOn: date })).run();
 }
 
-async function source(path, params) {
-  const response = await fetch(`${SOURCE}${path}?${new URLSearchParams(params)}`, {
+async function source(params) {
+  const response = await fetch(`${SOURCE}/json.php?${new URLSearchParams(params)}`, {
     headers: { 'User-Agent': 'Anime-keijiban/1.0 (+https://github.com/matsu609/Anime-keijiban)' },
     signal: AbortSignal.timeout(12000)
   });
   if (!response.ok) throw new Error(`しょぼいカレンダー HTTP ${response.status}`);
-  return response;
+  return response.json();
 }
