@@ -8,6 +8,7 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
   const sqlite = new DatabaseSync(':memory:');
   t.after(() => sqlite.close());
   sqlite.exec(readFileSync(new URL('../migrations/0001_board.sql', import.meta.url), 'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_thread_votes.sql', import.meta.url), 'utf8'));
   const DB = {
     prepare(sql) {
       const statement = sqlite.prepare(sql);
@@ -23,6 +24,7 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
     }
   };
   let now = Date.parse('2026-11-22T10:00:00+09:00');
+  const firstSync = now;
   t.mock.method(Date, 'now', () => now);
   const makeProgram = (pid, tid, ch, episode = '8', day = 0) => {
     const start = now / 1000 + day * 86400;
@@ -52,7 +54,7 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
     }
     assert.equal(req, 'ProgramByDate');
     assert.equal(url.searchParams.get('start'), new Date(now - 8 * 86400000).toISOString().slice(0, 10));
-    assert.equal(url.searchParams.get('days'), '15');
+    assert.equal(url.searchParams.get('days'), '16');
     return Response.json({
       Programs: {
         41: makeProgram(41, 8018, 19),
@@ -62,7 +64,11 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
         45: makeProgram(45, 8018, 19, '', 1),
         46: makeProgram(46, 9000, 19, '2', 2),
         47: makeProgram(47, 7000, 19, '4', 1),
-        48: makeProgram(48, 8018, 19, '7', -1),
+        ...(now === firstSync ? { 48: makeProgram(48, 8018, 19, '7', -1) } : {}),
+        49: makeProgram(49, 8018, 19, '1', -7),
+        50: makeProgram(50, 8018, 19, '2', -8),
+        51: makeProgram(51, 8018, 19, '9', 7),
+        52: makeProgram(52, 8018, 19, '10', 8),
         ...Object.fromEntries(Object.keys(extraTitles).map(id => [id, makeProgram(id, id, 19)]))
       }
     });
@@ -87,7 +93,9 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
   const schedule = await get('/api/schedule');
   assert.equal(schedule.status, 200);
   const data = await schedule.json();
-  assert.deepEqual(data.airings.map(row => row.id), ['8018-e8', '8018-e8', '8018-p45', '7000-e4']);
+  assert.deepEqual(data.airings.map(row => row.id), [
+    '8018-e1', '8018-e7', '8018-e8', '8018-e8', '8018-p45', '7000-e4'
+  ]);
   assert.equal(data.season.key, '2026-3');
   assert.deepEqual(data.season.shows.map(show => show.tid).sort(), [8018, 9000]);
   assert.equal(data.season.shows.find(show => show.tid === 8018).id, '8018-e8');
@@ -107,6 +115,8 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
   await worker.scheduled({}, { DB }, context);
   await Promise.all(pending);
   assert.equal(source.mock.callCount(), 4);
+  const refreshed = await (await get('/api/schedule')).json();
+  assert.equal(refreshed.airings.find(row => row.pid === 48).startsAt, firstSync - 86400000);
   const thread = await (await get('/api/threads/8018-e8')).json();
   assert.equal(thread.thread.title, '作品 & テスト');
   assert.equal(thread.comments[0].body, '実況テスト');
@@ -115,4 +125,24 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
   assert.equal(updates.comments.length, 3);
   const popular = await (await get('/api/popular')).json();
   assert.equal(popular.threads[0].count, 4);
+
+  const votesPath = '/api/threads/8018-e8/votes';
+  const voter = crypto.randomUUID();
+  const otherVoter = crypto.randomUUID();
+  const voteRequest = (path, voterId, value, source = origin) => worker.fetch(
+    new Request(origin + path + (value === undefined ? '' : '?vote=' + value), {
+      method: value === undefined ? 'GET' : 'PUT',
+      headers: { 'X-Voter-ID': voterId, Origin: source }
+    }), { DB }, context);
+  assert.deepEqual(await (await voteRequest(votesPath, voter)).json(), { good: 0, bad: 0, vote: 0 });
+  assert.deepEqual(await (await voteRequest(votesPath, voter, 1)).json(), { good: 1, bad: 0, vote: 1 });
+  assert.deepEqual(await (await voteRequest(votesPath, voter, 1)).json(), { good: 1, bad: 0, vote: 1 });
+  assert.deepEqual(await (await voteRequest(votesPath, otherVoter, -1)).json(), { good: 1, bad: 1, vote: -1 });
+  assert.deepEqual(await (await voteRequest(votesPath, voter, -1)).json(), { good: 0, bad: 2, vote: -1 });
+  assert.deepEqual(await (await voteRequest(votesPath, voter)).json(), { good: 0, bad: 2, vote: -1 });
+  assert.deepEqual(await (await voteRequest(votesPath, voter, 0)).json(), { good: 0, bad: 1, vote: 0 });
+  assert.deepEqual(await (await voteRequest('/api/threads/8018-e7/votes', otherVoter)).json(), { good: 0, bad: 0, vote: 0 });
+  assert.equal((await voteRequest(votesPath, voter, 2)).status, 400);
+  assert.equal((await voteRequest(votesPath, voter, 1, 'https://another.example')).status, 403);
+  assert.equal((await voteRequest('/api/threads/999-e1/votes', voter, 1)).status, 404);
 });

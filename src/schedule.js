@@ -8,6 +8,11 @@ export function jstDate(time) {
   return dayFormat.format(time);
 }
 
+export function calendarRange(time) {
+  const today = Date.parse(jstDate(time) + 'T00:00:00+09:00');
+  return { start: today - 7 * DAY, end: today + 2 * DAY };
+}
+
 export function normalizeSchedule(programs, titles, start, end) {
   return programs.flatMap(program => {
     const title = titles[program.TID];
@@ -97,13 +102,14 @@ export async function refreshSchedule(db) {
   if (!claim) return;
 
   const previous = readSnapshot(claim);
-  const today = Date.parse(date + 'T00:00:00+09:00');
-  const start = today - 7 * DAY;
-  const end = today + 7 * DAY;
+  const range = calendarRange(refreshedAt);
+  const start = range.start;
+  // 今期一覧で先の放送も拾えるよう、表示期間より広く同期する。
+  const end = range.end + 6 * DAY;
   const data = await source({
     Req: 'ProgramByDate',
     // 配信元は午前5時区切りなので、前日の分から取得して日本時間の0時で絞る。
-    start: jstDate(start - DAY), days: '15', ChID: CHANNELS.join(',')
+    start: jstDate(start - DAY), days: String((end - start) / DAY + 1), ChID: CHANNELS.join(',')
   });
   if (!data.Programs) throw new Error('番組表の形式が変わりました');
   const programs = Object.values(data.Programs);
@@ -136,6 +142,10 @@ export async function refreshSchedule(db) {
   const airings = normalizeSchedule(programs, titles, start, end);
   if (!airings.length) throw new Error('取得対象の放送がありません');
   const season = buildSeason(airings, titles, previous.season, refreshedAt);
+  const returnedPids = new Set(programs.map(program => Number(program.PID)));
+  const pastAirings = previous.airings.filter(airing =>
+    airing.startsAt >= start && airing.endsAt <= refreshedAt && !returnedPids.has(airing.pid));
+  const calendar = [...pastAirings, ...airings].sort((a, b) => a.startsAt - b.startsAt || a.pid - b.pid);
   const threads = new Map();
   for (const airing of airings) {
     if (!threads.has(airing.id) || airing.subtitle) threads.set(airing.id, airing);
@@ -152,7 +162,7 @@ export async function refreshSchedule(db) {
   await db.prepare(`INSERT INTO schedule VALUES(1, ?, ?)
     ON CONFLICT(id) DO UPDATE SET refreshed_at=excluded.refreshed_at, airings=excluded.airings
     WHERE excluded.refreshed_at >= schedule.refreshed_at`)
-    .bind(refreshedAt, JSON.stringify({ airings, season, titleCache, attemptedOn: date })).run();
+    .bind(refreshedAt, JSON.stringify({ airings: calendar, season, titleCache, attemptedOn: date })).run();
 }
 
 async function source(params) {

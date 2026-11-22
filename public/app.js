@@ -3,6 +3,8 @@ const timezone = 'Asia/Tokyo';
 const dateFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone });
 const timeFormat = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const fullDate = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, month: 'long', day: 'numeric', weekday: 'short' });
+const shortDate = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, month: 'numeric', day: 'numeric' });
+const dayMilliseconds = 86400000;
 const dateTime = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 function node(tag, value, className) {
@@ -30,22 +32,33 @@ const episodeLabel = episode => episode ? '第' + episode + '話' : '話数未�
 async function showSchedule() {
   const today = dateFormat.format(new Date());
   const midnight = Date.parse(today + 'T00:00:00+09:00');
-  const range = [midnight, midnight + 86400000];
+  const tomorrow = midnight + dayMilliseconds;
+  const otherDay = el('other-day');
   let selected = today;
   let airings = [];
   let loaded = false;
-  const dayButtons = range.map(day => {
+  const dayButtons = [[midnight, '今日'], [tomorrow, '明日']].map(([day, label]) => {
     const button = node('button');
     button.type = 'button';
     button.dataset.date = dateFormat.format(day);
-    button.append(node('span', day === midnight ? '今日' : '明日'), node('strong', button.dataset.date.slice(8)));
+    button.setAttribute('aria-label', label + ' ' + fullDate.format(day));
+    button.append(node('span', label), node('strong', shortDate.format(day)));
     button.addEventListener('click', () => {
       selected = button.dataset.date;
+      otherDay.value = '';
       render();
     });
     return button;
   });
   el('days').replaceChildren(...dayButtons);
+  for (let offset = 1; offset <= 7; offset++) {
+    const day = midnight - offset * dayMilliseconds;
+    otherDay.add(new Option(fullDate.format(day), dateFormat.format(day)));
+  }
+  otherDay.addEventListener('change', () => {
+    selected = otherDay.value || today;
+    render();
+  });
 
   function render() {
     dayButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.date === selected)));
@@ -66,7 +79,12 @@ async function showSchedule() {
       row.append(time, details, node('span', '↗', 'arrow'));
       return row;
     }));
-    if (!filtered.length) el('schedule').append(node('p', 'この条件の放送予定はありません。', 'empty'));
+    if (!filtered.length) {
+      const message = el('channel').value && airings.some(airing => dateFormat.format(airing.startsAt) === selected)
+        ? 'この放送局の番組データはありません。'
+        : 'この日の番組データはありません。';
+      el('schedule').append(node('p', message, 'empty'));
+    }
   }
 
   el('channel').addEventListener('change', render);
@@ -142,6 +160,51 @@ async function showRanking() {
   }
 }
 
+async function showVotes(path) {
+  const good = el('vote-good');
+  const bad = el('vote-bad');
+  const status = el('vote-status');
+  el('thread-votes').hidden = false;
+  let headers;
+  let selected = 0;
+
+  function render(result) {
+    selected = result.vote;
+    good.textContent = '＋ グッド ' + result.good;
+    bad.textContent = '− バッド ' + result.bad;
+    good.setAttribute('aria-pressed', String(selected === 1));
+    bad.setAttribute('aria-pressed', String(selected === -1));
+  }
+
+  try {
+    let voter = localStorage.getItem('thread-voter-id');
+    if (!voter) {
+      voter = crypto.randomUUID();
+      localStorage.setItem('thread-voter-id', voter);
+    }
+    headers = { 'X-Voter-ID': voter };
+    render(await api(path, { headers }));
+  } catch {
+    status.textContent = '投票を読み込めませんでした。';
+    return;
+  }
+  good.disabled = bad.disabled = false;
+
+  async function vote(value) {
+    good.disabled = bad.disabled = true;
+    status.textContent = '';
+    try {
+      render(await api(path + '?vote=' + (selected === value ? 0 : value), { method: 'PUT', headers }));
+    } catch (cause) {
+      status.textContent = cause.message;
+    } finally {
+      good.disabled = bad.disabled = false;
+    }
+  }
+  good.addEventListener('click', () => vote(1));
+  bad.addEventListener('click', () => vote(-1));
+}
+
 async function showThread() {
   el('home').hidden = true;
   el('thread').hidden = false;
@@ -194,6 +257,7 @@ async function showThread() {
     addComments(result.comments);
     el('older').hidden = !result.more;
     el('discussion').hidden = false;
+    showVotes(path + '/votes');
   } catch (cause) {
     el('thread-title').textContent = cause.message;
     return;

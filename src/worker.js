@@ -1,20 +1,20 @@
-import { jstDate, readSnapshot, refreshSchedule, seasonKey } from './schedule.js';
+import { calendarRange, readSnapshot, refreshSchedule, seasonKey } from './schedule.js';
 
 const json = (value, status = 200) => Response.json(value, {
   status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
 });
 const error = (message, status) => json({ error: message }, status);
 const threadPattern = /^[1-9]\d{0,8}-[ep][1-9]\d{0,8}$/;
+const voterPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 
 async function schedule(env) {
   const row = await env.DB.prepare('SELECT refreshed_at, airings FROM schedule WHERE id = 1').first();
   const snapshot = readSnapshot(row);
   const now = Date.now();
-  const today = Date.parse(jstDate(now) + 'T00:00:00+09:00');
-  const end = today + 2 * 86400000;
+  const { start, end } = calendarRange(now);
   return json({
     updatedAt: row?.refreshed_at || null,
-    airings: snapshot.airings.filter(row => row.startsAt >= today && row.startsAt < end),
+    airings: snapshot.airings.filter(row => row.startsAt >= start && row.startsAt < end),
     season: snapshot.season?.key === seasonKey(now) ? snapshot.season : null
   });
 }
@@ -79,6 +79,34 @@ async function post(env, id, request, url) {
   return result ? json({ comment: result }, 201) : error('投稿間隔を空けてもう一度お試しください。', 429);
 }
 
+async function votes(env, id, request, url) {
+  const voter = request.headers.get('X-Voter-ID') ?? '';
+  if (request.method === 'PUT') {
+    if (request.headers.get('Origin') !== url.origin) return error('このページから投票してください。', 403);
+    const value = url.searchParams.get('vote');
+    if (!voterPattern.test(voter) || !['-1', '0', '1'].includes(value)) {
+      return error('投票データが不正です。', 400);
+    }
+    if (value === '0') {
+      await env.DB.prepare('DELETE FROM thread_votes WHERE thread_id = ? AND voter_id = ?').bind(id, voter).run();
+    } else {
+      await env.DB.prepare(`INSERT INTO thread_votes (thread_id, voter_id, vote)
+        SELECT id, ?, ? FROM threads WHERE id = ?
+        ON CONFLICT(thread_id, voter_id) DO UPDATE SET vote = excluded.vote`)
+        .bind(voter, Number(value), id).run();
+    }
+  } else if (request.method !== 'GET') {
+    return error('この操作は利用できません。', 405);
+  }
+  const result = await env.DB.prepare(`SELECT
+    COUNT(CASE WHEN v.vote = 1 THEN 1 END) AS good,
+    COUNT(CASE WHEN v.vote = -1 THEN 1 END) AS bad,
+    COALESCE(MAX(CASE WHEN v.voter_id = ? THEN v.vote END), 0) AS vote
+    FROM threads AS t LEFT JOIN thread_votes AS v ON v.thread_id = t.id
+    WHERE t.id = ? GROUP BY t.id`).bind(voter, id).first();
+  return result ? json(result) : error('スレッドが見つかりません。', 404);
+}
+
 export default {
   async scheduled(_event, env, context) {
     context.waitUntil(refreshSchedule(env.DB));
@@ -101,8 +129,9 @@ export default {
           .bind(Date.now() - 7 * 86400000).all();
         return json({ threads: results });
       }
-      const [, id] = /^\/api\/threads\/([^/]+)$/.exec(pathname) ?? [];
+      const [, id, votePath] = /^\/api\/threads\/([^/]+)(\/votes)?$/.exec(pathname) ?? [];
       if (id && threadPattern.test(id)) {
+        if (votePath) return await votes(env, id, request, url);
         if (request.method === 'GET') return await thread(env, id, url);
         if (request.method === 'POST') return await post(env, id, request, url);
         return error('この操作は利用できません。', 405);

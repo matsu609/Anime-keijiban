@@ -3,6 +3,9 @@
   "name": "anime-keijiban",
   "main": "src/worker.js",
   "compatibility_date": "2026-11-22",
+  "build": {
+    "command": "if [ \"${WORKERS_CI:-}\" = 1 ]; then npm run db:remote; fi"
+  },
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
