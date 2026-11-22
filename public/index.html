@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#161715">
+  <meta name="description" content="アニメの放送予定と、話数ごとの匿名実況・感想スレッド。">
+  <title>アニメ掲示板</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="top"><div class="wrap top-inner">
+    <a class="brand" href="/"><span aria-hidden="true" class="mark">▶</span>アニメ掲示板</a>
+    <nav aria-label="サイト内"><a href="/">番組表</a><a href="/#popular">人気スレッド</a></nav>
+  </div></header>
+  <main class="wrap">
+    <div id="home">
+      <section class="hero">
+        <div><p class="kicker">関東の地上波</p><h1>アニメ番組表</h1><p>放送をチェック。見ながら、見終わったら、話数ごとのスレッドへ。</p></div>
+        <div class="hero-art" aria-hidden="true"><div class="screen"><span>▶</span></div><i></i><i></i></div>
+      </section>
+      <div class="layout">
+        <section aria-labelledby="calendar-heading">
+          <div class="section-heading"><h2 id="calendar-heading">放送カレンダー</h2></div>
+          <div class="days" id="days" aria-label="放送日"></div>
+          <div class="day-heading"><h3 id="selected-day"></h3><label>放送局 <select id="channel"><option value="">すべて</option></select></label></div>
+          <div id="schedule" aria-live="polite"><p class="empty">番組表を読み込み中…</p></div>
+        </section>
+        <aside class="side" id="popular" aria-labelledby="popular-heading">
+          <div class="section-heading"><h2 id="popular-heading">人気スレッド</h2><small>直近7日間</small></div>
+          <div id="ranking"><p class="empty">読み込み中…</p></div>
+        </aside>
+      </div>
+    </div>
+    <article id="thread" class="thread" hidden>
+      <a href="/" class="back">← 番組表</a>
+      <header class="thread-heading"><p class="kicker" id="episode"></p><h1 id="thread-title">スレッドを読み込み中…</h1><p id="subtitle"></p></header>
+      <section id="discussion" hidden aria-label="コメント">
+        <div class="section-heading"><h2>実況・感想</h2><button class="plain" id="older" hidden>過去のコメントを表示</button></div>
+        <ol id="comments"></ol>
+        <p class="empty" id="no-comments" hidden>まだコメントはありません。</p>
+        <form id="comment-form">
+          <label for="body">匿名でコメント</label>
+          <textarea id="body" name="body" placeholder="実況や感想を書く" required rows="3"></textarea>
+          <div class="form-row"><span id="post-status" role="status"></span><button class="primary" type="submit">投稿する</button></div>
+        </form>
+      </section>
+    </article>
+  </main>
+  <footer class="wrap">番組データ <a href="https://cal.syoboi.jp/">しょぼいカレンダー</a><span>時刻は日本時間</span></footer>
+</body>
+</html>
