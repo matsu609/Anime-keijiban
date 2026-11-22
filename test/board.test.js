@@ -22,28 +22,39 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
       return wrap([]);
     }
   };
-  const now = Math.floor(Date.now() / 1000);
-  const makeProgram = (pid, tid, ch, episode = '8') => ({
-    PID: String(pid), TID: String(tid), ChID: String(ch), ChName: 'テスト局',
-    Count: episode, StTime: String(now), EdTime: String(now + 1200), SubTitle2: 'サブタイトル'
-  });
-  t.mock.method(globalThis, 'fetch', async value => {
+  const now = Date.parse('2026-11-22T10:00:00+09:00');
+  t.mock.method(Date, 'now', () => now);
+  const makeProgram = (pid, tid, ch, episode = '8', day = 0) => {
+    const start = now / 1000 + day * 86400;
+    return {
+      PID: String(pid), TID: String(tid), ChID: String(ch), ChName: 'テスト局',
+      Count: episode, StTime: String(start), EdTime: String(start + 1200), SubTitle2: 'サブタイトル'
+    };
+  };
+  const source = t.mock.method(globalThis, 'fetch', async value => {
     const url = new URL(value);
-    if (url.pathname === '/json.php') {
-      assert.equal(url.searchParams.get('Req'), 'ProgramByDate');
-      return Response.json({ Programs: {
+    assert.equal(url.pathname, '/json.php');
+    assert.equal(url.searchParams.get('Req'), 'ProgramByDate,TitleShort');
+    assert.equal(url.searchParams.get('start'), '2026-11-14');
+    assert.equal(url.searchParams.get('days'), '15');
+    return Response.json({
+      Programs: {
         41: makeProgram(41, 8018, 19),
         42: makeProgram(42, 8018, 5),
         43: makeProgram(43, 8300, 19),
         44: makeProgram(44, 8018, 20),
-        45: makeProgram(45, 8018, 19, '')
-      } });
-    }
-    assert.equal(url.searchParams.get('Command'), 'TitleLookup');
-    return new Response(`<TitleLookupResponse><Result><Code>200</Code></Result><TitleItems>
-      <TitleItem id="8018"><TID>8018</TID><Title>作品 &amp; テスト</Title><Cat>1</Cat></TitleItem>
-      <TitleItem id="8300"><TID>8300</TID><Title>情報番組</Title><Cat>5</Cat></TitleItem>
-      </TitleItems></TitleLookupResponse>`);
+        45: makeProgram(45, 8018, 19, '', 1),
+        46: makeProgram(46, 9000, 19, '2', 2),
+        47: makeProgram(47, 7000, 19, '4', 1),
+        48: makeProgram(48, 8018, 19, '7', -1)
+      },
+      Titles: {
+        8018: { Title: '作品 & テスト', Cat: '1' },
+        8300: { Title: '情報番組', Cat: '5' },
+        9000: { Title: '後日の今期作品', Cat: '1' },
+        7000: { Title: '旧作の再放送', Cat: '10', FirstEndYear: '2025', FirstEndMonth: '12' }
+      }
+    });
   });
 
   const origin = 'https://anime.example';
@@ -54,9 +65,22 @@ test('番組表から同じ話数のスレッドに集まり、再同期後も�
     method: 'POST', headers: { 'Content-Type': 'application/json', Origin: source }, body: JSON.stringify({ body })
   }), { DB }, context);
 
+  const empty = await (await get('/api/schedule')).json();
+  assert.deepEqual(empty, { updatedAt: null, airings: [], season: null });
+  sqlite.prepare('INSERT INTO schedule VALUES (1, ?, ?)').run(now - 86400000, JSON.stringify([]));
+  assert.equal((await (await get('/api/schedule')).json()).season, null);
+  assert.equal(source.mock.callCount(), 0);
+
+  await worker.scheduled({}, { DB }, context);
+  await Promise.all(pending);
   const schedule = await get('/api/schedule');
   assert.equal(schedule.status, 200);
-  assert.deepEqual((await schedule.json()).airings.map(row => row.id), ['8018-e8', '8018-e8', '8018-p45']);
+  const data = await schedule.json();
+  assert.deepEqual(data.airings.map(row => row.id), ['8018-e8', '8018-e8', '8018-p45', '7000-e4']);
+  assert.equal(data.season.key, '2026-3');
+  assert.deepEqual(data.season.shows.map(show => show.tid).sort(), [8018, 9000]);
+  assert.equal(data.season.shows.find(show => show.tid === 8018).id, '8018-e8');
+  assert.equal(source.mock.callCount(), 1);
   assert.equal((await post('実況テスト', 'https://another.example')).status, 403);
   assert.equal((await post('　')).status, 400);
   const comment = await post('実況テスト');

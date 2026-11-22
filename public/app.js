@@ -2,7 +2,6 @@ const el = id => document.getElementById(id);
 const timezone = 'Asia/Tokyo';
 const dateFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: timezone });
 const timeFormat = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const weekday = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, weekday: 'short' });
 const fullDate = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, month: 'long', day: 'numeric', weekday: 'short' });
 const dateTime = new Intl.DateTimeFormat('ja-JP', { timeZone: timezone, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -31,7 +30,7 @@ const episodeLabel = episode => episode ? '第' + episode + '話' : '話数未�
 async function showSchedule() {
   const today = dateFormat.format(new Date());
   const midnight = Date.parse(today + 'T00:00:00+09:00');
-  const range = Array.from({ length: 8 }, (_, i) => midnight + (i - 1) * 86400000);
+  const range = [midnight, midnight + 86400000];
   let selected = today;
   let airings = [];
   let loaded = false;
@@ -39,7 +38,7 @@ async function showSchedule() {
     const button = node('button');
     button.type = 'button';
     button.dataset.date = dateFormat.format(day);
-    button.append(node('span', day === midnight ? '今日' : weekday.format(day)), node('strong', button.dataset.date.slice(8)));
+    button.append(node('span', day === midnight ? '今日' : '明日'), node('strong', button.dataset.date.slice(8)));
     button.addEventListener('click', () => {
       selected = button.dataset.date;
       render();
@@ -73,17 +72,51 @@ async function showSchedule() {
   el('channel').addEventListener('change', render);
   render();
   try {
-    ({ airings } = await api('/api/schedule'));
+    const data = await api('/api/schedule');
+    airings = data.airings;
+    if (data.updatedAt) el('schedule-updated').textContent = '更新 ' + dateTime.format(data.updatedAt);
+    renderSeason(data.season);
     const channels = [...new Set(airings.map(airing => airing.channel))].sort((a, b) => a.localeCompare(b, 'ja'));
     el('channel').append(...channels.map(channel => new Option(channel, channel)));
     loaded = true;
     render();
-    setInterval(render, 60000);
+    setInterval(() => {
+      if (dateFormat.format(new Date()) === today) render();
+      else location.reload();
+    }, 60000);
   } catch (cause) {
+    el('season-list').replaceChildren(node('p', cause.message, 'empty'));
     const retry = node('button', '再読み込み', 'plain');
     retry.addEventListener('click', () => location.reload());
     el('schedule').replaceChildren(node('p', cause.message, 'empty'), retry);
   }
+}
+
+function renderSeason(season) {
+  if (!season) {
+    el('season-list').replaceChildren(node('p', '次回の番組表更新で今期の作品を読み込みます。', 'empty'));
+    return;
+  }
+  const [year, quarter] = season.key.split('-').map(Number);
+  el('season-period').textContent = year + '年' + ['冬', '春', '夏', '秋'][quarter] + ' ／ 関東';
+  if (!season.shows.length) {
+    el('season-list').replaceChildren(node('p', '今期の放送作品はまだ登録されていません。', 'empty'));
+    return;
+  }
+  const list = node('ul', null, 'season-list');
+  const now = Date.now();
+  for (const show of season.shows) {
+    const item = node('li');
+    const link = threadLink(show);
+    const info = node('div', null, 'air-details');
+    const episode = (show.episode ? episodeLabel(show.episode) + ' ／ ' : '') + show.channel;
+    const date = (show.endsAt > now ? '次回 ' : '前回 ') + dateTime.format(show.startsAt);
+    info.append(node('strong', show.title), node('small', episode + ' ／ ' + date));
+    link.append(info, node('span', '↗', 'arrow'));
+    item.append(link);
+    list.append(item);
+  }
+  el('season-list').replaceChildren(list);
 }
 
 async function showRanking() {

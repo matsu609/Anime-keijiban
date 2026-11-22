@@ -52,7 +52,7 @@ h1 { font-size: clamp(2rem, 5vw, 3.7rem); line-height: 1.2; letter-spacing: -.04
 .section-heading { margin-bottom: 14px; flex-wrap: wrap; }
 .section-heading h2 { font-size: 1.2rem; }
 small, .day-heading label, footer, .empty, .comment-meta { color: var(--muted); font-size: .83rem; }
-.days { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 5px; margin-bottom: 18px; }
+.days { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin-bottom: 18px; }
 .days button { padding: 8px 0; min-height: 52px; display: grid; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
 .days button span { font-size: .7rem; }
 .days button:hover { border-color: var(--accent); }
@@ -97,4 +97,12 @@ button:disabled { opacity: .55; cursor: default; }
   .top nav { font-size: .74rem; }
   .hero { margin-block: 18px 24px; }
   .hero-art { display: none; }
+}
+
+.season-section { margin-top: 34px; }
+.season-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 8px; list-style: none; margin: 0; padding: 0; }
+.season-list a { display: flex; justify-content: space-between; align-items: center; gap: 10px; height: 100%; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; }
+.season-list a:hover { border-color: var(--accent); }
+@media (max-width: 375px) {
+  .top-inner { flex-wrap: wrap; padding-block: 8px; }
 }

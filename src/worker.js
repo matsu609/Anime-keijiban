@@ -1,4 +1,4 @@
-import { refreshSchedule } from './schedule.js';
+import { jstDate, readSnapshot, refreshSchedule, seasonKey } from './schedule.js';
 
 const json = (value, status = 200) => Response.json(value, {
   status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
@@ -6,16 +6,17 @@ const json = (value, status = 200) => Response.json(value, {
 const error = (message, status) => json({ error: message }, status);
 const threadPattern = /^[1-9]\d{0,8}-[ep][1-9]\d{0,8}$/;
 
-async function schedule(env, context) {
-  const read = () => env.DB.prepare('SELECT refreshed_at, airings FROM schedule WHERE id = 1').first();
-  let snapshot = await read();
-  if (!snapshot) {
-    await refreshSchedule(env.DB);
-    snapshot = await read();
-  } else if (Date.now() - snapshot.refreshed_at > 2 * 3600000) {
-    context.waitUntil(refreshSchedule(env.DB).catch(console.error));
-  }
-  return json({ updatedAt: snapshot.refreshed_at, airings: JSON.parse(snapshot.airings) });
+async function schedule(env) {
+  const row = await env.DB.prepare('SELECT refreshed_at, airings FROM schedule WHERE id = 1').first();
+  const snapshot = readSnapshot(row);
+  const now = Date.now();
+  const today = Date.parse(jstDate(now) + 'T00:00:00+09:00');
+  const end = today + 2 * 86400000;
+  return json({
+    updatedAt: row?.refreshed_at ?? null,
+    airings: snapshot.airings.filter(row => row.startsAt >= today && row.startsAt < end),
+    season: snapshot.season?.key === seasonKey(now) ? snapshot.season : null
+  });
 }
 
 async function thread(env, id, url) {
@@ -83,7 +84,7 @@ export default {
     context.waitUntil(refreshSchedule(env.DB));
   },
 
-  async fetch(request, env, context) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     const { pathname } = url;
     if (pathname.startsWith('/thread/') && threadPattern.test(pathname.slice(8))) {
@@ -92,7 +93,7 @@ export default {
     if (!pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
 
     try {
-      if (request.method === 'GET' && pathname === '/api/schedule') return await schedule(env, context);
+      if (request.method === 'GET' && pathname === '/api/schedule') return await schedule(env);
       if (request.method === 'GET' && pathname === '/api/popular') {
         const { results } = await env.DB.prepare(`SELECT t.id, t.title, t.episode, COUNT(*) AS count
           FROM comments AS c JOIN threads AS t ON c.thread_id = t.id WHERE c.posted_at >= ?

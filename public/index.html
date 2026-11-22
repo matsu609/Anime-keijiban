@@ -12,7 +12,7 @@
 <body>
   <header class="top"><div class="wrap top-inner">
     <a class="brand" href="/"><span aria-hidden="true" class="mark">▶</span>アニメ掲示板</a>
-    <nav aria-label="サイト内"><a href="/">番組表</a><a href="/#popular">人気スレッド</a></nav>
+    <nav aria-label="サイト内"><a href="/">番組表</a><a href="/#season">今期アニメ</a><a href="/#popular">人気スレッド</a></nav>
   </div></header>
   <main class="wrap">
     <div id="home">
@@ -22,7 +22,7 @@
       </section>
       <div class="layout">
         <section aria-labelledby="calendar-heading">
-          <div class="section-heading"><h2 id="calendar-heading">放送カレンダー</h2></div>
+          <div class="section-heading"><h2 id="calendar-heading">放送カレンダー</h2><small id="schedule-updated"></small></div>
           <div class="days" id="days" aria-label="放送日"></div>
           <div class="day-heading"><h3 id="selected-day"></h3><label>放送局 <select id="channel"><option value="">すべて</option></select></label></div>
           <div id="schedule" aria-live="polite"><p class="empty">番組表を読み込み中…</p></div>
@@ -32,6 +32,10 @@
           <div id="ranking"><p class="empty">読み込み中…</p></div>
         </aside>
       </div>
+      <section class="season-section" id="season" aria-labelledby="season-heading">
+        <div class="section-heading"><h2 id="season-heading">今期の地上波アニメ</h2><small id="season-period"></small></div>
+        <div id="season-list"><p class="empty">今期の作品を読み込み中…</p></div>
+      </section>
     </div>
     <article id="thread" class="thread" hidden>
       <a href="/" class="back">← 番組表</a>

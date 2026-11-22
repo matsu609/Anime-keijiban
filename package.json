@@ -11,8 +11,5 @@
   },
   "devDependencies": {
     "wrangler": "4.166.0"
-  },
-  "dependencies": {
-    "fast-xml-parser": "5.12.1"
   }
 }
